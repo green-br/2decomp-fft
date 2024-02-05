@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)                        
+cmake_minimum_required(VERSION 3.16)                        
 cmake_policy(SET CMP0074 NEW)
 
 project(decomp2d
@@ -15,6 +15,7 @@ set(BUILD_TARGET "mpi" CACHE STRING "Target for acceleration (mpi (default) or g
 set_property(CACHE BUILD_TARGET PROPERTY STRINGS mpi gpu)
 
 if (BUILD_TARGET MATCHES "gpu")
+  cmake_minimum_required(VERSION 3.21)                        
   option(ENABLE_OPENACC "Allow user to activate/deactivate OpenACC support" ON)
   option(ENABLE_CUDA "Allow user to activate/deactivate CUDA support" ON)
   option(ENABLE_MANAGED "Allow user to activate/deactivate automatic memory managment from NVHPC" OFF)
