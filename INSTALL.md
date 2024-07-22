@@ -2,13 +2,21 @@
 
 The library 2decomp is a Fortran library compatible with the Fortran 2008 standard.
 It requires a MPI library compatible with MPI-2.0 with extended Fortran support.
-The following [optional libraries](#optional-dependencies) can be used :
+The following compilers and [optional libraries](#optional-dependencies) have been tested 
+as part of of our CI/CD toolchain:
 
-- ADIOS2, version 2.9.0 was tested
-- FFTW3, version 3.3.10 was tested
-- Intel oneMKL (oneAPI Math Kernel Library), version 2023.0.0 was tested
-- Nvidia GPU-related libraries, NVHPC version 22.7 and CUDA version 11.8 were tested
-- Caliper, version 2.9.1 was tested
+- GNU compilers version 13.2.0 together with OpenMPI version 4.1.6;
+- Intel oneAPI with: intel LLVM compilers version 2024.0.1, 
+  oneMKL (math Kernel Library) version 2024.0.1, intel MPI version 2021.10.0, 
+  intel classic compiler version 2021.10.0; 
+- Nvidia NVHPC version 23.11 with CUDA version 12.3.52 and NCCL version 2.18.5 for GPU acceleration 
+- ADIOS2, version 2.9.0;
+- FFTW3, version 3.3.10;
+- Caliper, version 2.10.0.
+
+Other version of the compilers and libraries are tested, but this is not done on a regular base 
+and as part of a properly defined CI/CD toolchain. 
+We will also aim at updating the versions of the different compilers and libraries every 6-12 months.
 
 ## Building
 
@@ -16,17 +24,17 @@ The build system is driven by `cmake`. It is good practice to directly point to 
 MPI Fortran wrapper that you would like to use to guarantee consistency between Fortran compiler and MPI. 
 This can be done by setting the default Fortran environmental variable 
 ```
-export FC=my_mpif90
+$ export FC=my_mpif90
 ```
 To generate the build system run
 ```
-cmake -S $path_to_sources -B $path_to_build_directory -DOPTION1 -DOPTION2 ...
+$ cmake -S $path_to_sources -B $path_to_build_directory -DOPTION1 -DOPTION2 ...
 ```
 If the directory does not exist it will be generated and it will contain the configuration files. 
 The configuration can be further
 edited by using the `ccmake` utility as
 ```
-ccmake $path_to_build_directory
+$ ccmake $path_to_build_directory
 ```
 and editing as desired, variables that are likely of interest are: `CMAKE_BUILD_TYPE` and `FFT_Choice`;
 additional variables can be shown by entering "advanced mode" by pressing `t`.
@@ -42,7 +50,7 @@ Please see section [GPU Compilation](#gpu-compilation)
 
 Once the build system has been configured, you can build 2DECOMP&FFT` by running
 ```
-cmake --build $path_to_build_directory -j <nproc>
+$ cmake --build $path_to_build_directory -j <nproc>
 ```
 appending `-v` will display additional information about the build, such as compiler flags.
 
@@ -50,7 +58,7 @@ After building the library can be tested. Please see section [Testing and exampl
 
 Options can be added to change the level of verbosity. Finally, the build library can be installed by running 
 ```
-cmake --install $path_to_build_directory
+$ cmake --install $path_to_build_directory
 ```
 The default location for `libdecomp2d.a` is `$path_to_build_directory/opt/lib` 
 or `$path_to_build_directory/opt/lib64` unless the variable `CMAKE_INSTALL_PREFIX` is modified.
@@ -61,14 +69,14 @@ users of the library should add this to the include paths for their program.
 As indicated above, by default a static `libdecomp2d.a` will be compiled, 
 if desired a shared library can be built by setting `BUILD_SHARED_LIBS=ON` either on the command line:
 ```
-cmake -S $path_to_sources -B $path_to_build_directory -DBUILD_SHARED_LIBS=ON
+$ cmake -S $path_to_sources -B $path_to_build_directory -DBUILD_SHARED_LIBS=ON
 ```
 or by editing the configuration using `ccmake`.
 This might be useful for a centralised install supporting multiple users that is upgraded over time.
 
 Occasionally a clean build is required, this can be performed by running
 ```
-cmake --build $path_to_build_directory --target clean
+$ cmake --build $path_to_build_directory --target clean
 ```
 
 ## GPU compilation
@@ -79,14 +87,15 @@ The FFT is based on cuFFT.
 
 To properly configure for GPU build the following needs to be used 
 ```
-cmake -S $path_to_sources -B $path_to_build_directory -DBUILD_TARGET=gpu
+$ cmake -S $path_to_sources -B $path_to_build_directory -DBUILD_TARGET=gpu
 ```
 Note, further configuration can be performed using `ccmake`, however the initial configuration of GPU builds must include the `-DBUILD_TARGET=gpu` flag as shown above.
 
 By default CUDA aware MPI will be used together with `cuFFT` for the FFT library. The configure will automatically look for the GPU architecture available on the system. If you are building on a HPC system please use a computing node for the installation. Useful variables to be added are 
 
  - `-DENABLE_NCCL=yes` to activate the NCCL collectives
- - `-DENABLE_MANAGED=yes` to activate the automatic memory management form the NVHPC compiler
+ - `-DENABLE_MANAGED=yes` to activate the automatic memory management from the NVHPC compiler
+
 If you are getting the following error
 ```
 -- The CUDA compiler identification is unknown  
@@ -165,9 +174,9 @@ clean-decomp:
 Profiling can be activated via `cmake` configuration, 
 the recommended approach is to run the initial configuration as follows:
 ```
-export caliper_DIR=/path/to/caliper/install/share/cmake/caliper
-export CXX=mpicxx
-cmake -S $path_to_sources -B $path_to_build_directory -DENABLE_PROFILER=caliper
+$ export caliper_DIR=/path/to/caliper/install/share/cmake/caliper
+$ export CXX=mpicxx
+$ cmake -S $path_to_sources -B $path_to_build_directory -DENABLE_PROFILER=caliper
 ```
 where `ENABLE_PROFILER` is set to the profiling tool desired, currently supported values are: `caliper`.
 Note that when using `caliper` a C++ compiler is required as indicated in the above command line.
@@ -178,25 +187,22 @@ Note that when using `caliper` a C++ compiler is required as indicated in the ab
 
 In order to compile with the MKL libraries the following environmental variable needs to be set up
 ```
-export MKL_DIR=${MKLROOT}/lib/cmake/mkl
+$ export MKL_DIR=${MKLROOT}/lib/cmake/mkl
 ```
 and select the MKL backend by setting `FFT_Choice=mkl`.
 
-To use the new IntelLLVM compiler specify it as the Fortran compiler using
+To use the new IntelLLVM compiler, up until the 2023 version, specify it as the Fortran compiler using
 ```
-export export FC="mpiifort -fc=ifx"
+export FC="mpiifort -fc=ifx"
 ```
 and when building with ADIOS2 support you must also specify the `C` and `CXX` compilers
 ```
 export CXX="mpiicpc -cxx=icpx"
 export CC="mpiicc -cc=icx"
 ```
+From the 2024 version new MPI wrapper are available as `mpiifx`, `mpiicx` and `mpiicpx`. 
 
 ### List of preprocessor variables
-
-#### ADIOS2
-
-This variable is automatically added in builds with the adios2 IO backend.
 
 #### DEBUG
 
@@ -220,11 +226,15 @@ This preprocessor variable is not valid for GPU builds. It leads to padded allto
 
 #### OVERWRITE
 
-This variable leads to overwrite the input array when computing FFT. The support of this flag does not always correspond to in-place transforms, depending on the FFT backend selected, as described above. This preprocessor variable is driven by the CMake on/off variable `ENABLE_INPLACE`.
+This variable leads to overwrite the input array when computing FFT. The support of this flag does not always correspond to in-place transforms, depending on the FFT backend selected. This preprocessor variable is driven by the CMake on/off variable `ENABLE_INPLACE`.
 
 #### HALO_DEBUG
 
 This variable is used to debug the halo operations. This preprocessor variable is driven by the CMake on/off variable `HALO_DEBUG`.
+
+#### HALO_GLOBAL
+
+This variable is used in the example used to test the halo operations. If the variable is defined, the test are using arrays defined with the key `opt_global` set to `.true.`. Otherwise, the arrays are defined with the key set to `.false.`.
 
 #### _GPU
 
@@ -241,13 +251,13 @@ This variable is valid only for GPU builds. The NVIDIA Collective Communication 
 The library [adios2](https://adios2.readthedocs.io/en/latest/) can be used as a backend for IO. The version 2.9.0 was tested, is supported and can be downloaded [here](https://github.com/ornladios/ADIOS2/archive/refs/tags/v2.9.0.tar.gz). Below are build instructions for the library. However, it is recommended to use the one provided by the administrators of the computing centre if available.
 
 ```
-wget https://github.com/ornladios/ADIOS2/archive/refs/tags/v2.9.0.tar.gz
-tar xzf v2.9.0.tar.gz
-mkdir 2.9.0_tmp && cd 2.9.0_tmp
-CC=mpicc CXX=mpicxx FC=mpif90 cmake -S ../ADIOS2-2.9.0 -DCMAKE_INSTALL_PREFIX=../2.9.0_bld
-make -j
-make -j test
-make -j install
+$ wget https://github.com/ornladios/ADIOS2/archive/refs/tags/v2.9.0.tar.gz
+$ tar xzf v2.9.0.tar.gz
+$ mkdir 2.9.0_tmp && cd 2.9.0_tmp
+$ CC=mpicc CXX=mpicxx FC=mpif90 cmake -S ../ADIOS2-2.9.0 -DCMAKE_INSTALL_PREFIX=../2.9.0_bld
+$ make -j
+$ make -j test
+$ make -j install
 ```
 
 To build 2DECOMP&FFT with the adios2 IO backend, one can provide the package configuration for adios2 
@@ -256,9 +266,9 @@ this should be found under `/path/to/adios2/install/lib/cmake/adios2`.
 One can also provide the option `-Dadios2_DIR=/path/to/adios2/install/lib/cmake/adios2`. 
 Then either specify on the command line when configuring the build
 ```
-cmake -S . -B ./build -DIO_BACKEND=adios2 -Dadios2_DIR=/path/to/adios2/install/lib/cmake/adios2
+$ cmake -S . -B ./build -DIO_BACKEND=adios2 -Dadios2_DIR=/path/to/adios2/install/lib/cmake/adios2
 ```
-or modify the build configuration using `ccmake`. Please note that the support for ADIOS2 is not complete. Currently, for a given IO operation, when the ADIOS2 backend is not supported, the MPI backend is used.
+or modify the build configuration using `ccmake`.
 
 ### FFTW
 
@@ -271,13 +281,13 @@ Below is a suggestion for the compilation of the library in double precision
 (add `--enable-single` for a single precision build):
 
 ```
-wget http://www.fftw.org/fftw-3.3.10.tar.gz
-tar xzf fftw-3.3.10.tar.gz
-mkdir fftw-3.3.10_tmp && cd fftw-3.3.10_tmp
-../fftw-3.3.10/configure --prefix=xxxxxxx/fftw3/fftw-3.3.10_bld --enable-shared
-make -j
-make -j check
-make install
+$ wget http://www.fftw.org/fftw-3.3.10.tar.gz
+$ tar xzf fftw-3.3.10.tar.gz
+$ mkdir fftw-3.3.10_tmp && cd fftw-3.3.10_tmp
+$ ../fftw-3.3.10/configure --prefix=xxxxxxx/fftw3/fftw-3.3.10_bld --enable-shared
+$ make -j
+$ make -j check
+$ make install
 ```
 Please note that the resulting build is not compatible with `cmake` 
 (https://github.com/FFTW/fftw3/issues/130). 
@@ -294,19 +304,31 @@ this should be found under `/path/to/fftw3/install/lib/pkgconfig`.
 One can also provide the option `-DFFTW_ROOT=/path/to/fftw3/install`. 
 Then either specify on the command line when configuring the build
 ```
-cmake -S . -B build -DFFT_Choice=<fftw|fftw_f03> -DFFTW_ROOT=/path/to/fftw3/install
+$ cmake -S . -B build -DFFT_Choice=<fftw|fftw_f03> -DFFTW_ROOT=/path/to/fftw3/install
 ```
 or modify the build configuration using `ccmake`.
 
-Note the legacy `fftw` interface lacks interface definitions 
-and will fail when stricter compilation flags are used (e.g. when `-DCMAKE_BUILD_TYPE=Dev`) 
-for this it is recommended to use `fftw_f03` which provides proper interfaces.
+Note the legacy `fftw` interface is deprecated, lacks interface definitions 
+and will fail when stricter compilation flags are used (e.g. when `-DCMAKE_BUILD_TYPE=Dev`).
+It is recommended to use `fftw_f03`.
+
+#### Vendor FFTW
+
+Some vendors supply an FFTW library optimised for their systems.
+These can be used via the same FFTW interfaces described above, linking etc. may be performed automatically by some compilers, however the `-DFFTW_ROOT` variable can also used if the system fails to find the vendor FFTW.
+An example of configuring `2decomp&fft` against a vendor FFTW using AMD AOCL is
+```
+cmake -S . -B build -DFFT_Choice=fftw_f03 -DFFTW_ROOT=${AOCL_ROOT}
+```
+where `${AOCL_ROOT}` is the AOCL installation directory.
+Linking against other vendor's libraries should work similarly.
+On Cray systems using the Cray compiler wrappers the FFTW library (when selected) should be picked up automatically when the `cray-fftw` module is loaded.
 
 ### Caliper
 
 The library [caliper](https://github.com/LLNL/Caliper) can be used to profile the execution of the code. 
-The version 2.9.1 was tested and is supported, version 2.8.0 has also been tested 
-and is still expected to work. 
+The version 2.10.0 was tested and is supported, other versions above 2.8.0 were also tested 
+and are still expected to work. 
 Please note that one must build caliper and decomp2d against the same C/C++/Fortran 
 compilers and MPI libray. 
 For build instructions, please check 
@@ -315,19 +337,19 @@ and [here](https://software.llnl.gov/Caliper/CaliperBasics.html#build-and-instal
 Below is a suggestion for the compilation of the library using the GNU compilers:
 
 ```
-git clone https://github.com/LLNL/Caliper.git caliper_github
-cd caliper_github
-git checkout v2.9.1
-mkdir build && cd build
-cmake -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_INSTALL_PREFIX=../../caliper_build_2.9.1 -DWITH_FORTRAN=yes -DWITH_MPI=yes -DBUILD_TESTING=yes ../
-make -j
-make test
-make install
+$ git clone https://github.com/LLNL/Caliper.git caliper_github
+$ cd caliper_github
+$ git checkout v2.10.0
+$ mkdir build && cd build
+$ cmake -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_Fortran_COMPILER=gfortran -DCMAKE_INSTALL_PREFIX=../../caliper_build_2.10.0 -DWITH_FORTRAN=yes -DWITH_MPI=yes -DBUILD_TESTING=yes ../
+$ make -j
+$ make test
+$ make install
 ```
 
 After installing Caliper ensure to set `caliper_DIR=/path/to/caliper/install/share/cmake/caliper`.
 Following this the `2decomp-fft` build can be configured to use Caliper profiling as
 ```
-cmake -S . -B -DENABLE_PROFILER=caliper
+$ cmake -S . -B -DENABLE_PROFILER=caliper
 ```
 or by modifying the configuration to set `ENABLE_PROFILER=caliper` via `ccmake`.

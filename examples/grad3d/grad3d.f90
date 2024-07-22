@@ -10,6 +10,7 @@ program grad3d
    use decomp_2d
    use decomp_2d_constants
    use decomp_2d_mpi
+   use decomp_2d_testing
    use MPI
 #if defined(_GPU)
    use cudafor
@@ -23,10 +24,8 @@ program grad3d
    integer :: p_row = 0, p_col = 0
    integer :: resize_domain
    integer :: nranks_tot
-   integer :: nargin, arg, FNLength, status, DecInd
    integer :: ierror
    logical :: all_pass
-   character(len=80) :: InputFN
 
    real(mytype), parameter :: lx = 1.0_mytype
    real(mytype), parameter :: ly = 1.0_mytype
@@ -48,43 +47,11 @@ program grad3d
    ny = ny_base * resize_domain
    nz = nz_base * resize_domain
    ! Now we can check if user put some inputs
-   ! Handle input file like a boss -- GD
-   nargin = command_argument_count()
-   if ((nargin == 0) .or. (nargin == 2) .or. (nargin == 5)) then
-      do arg = 1, nargin
-         call get_command_argument(arg, InputFN, FNLength, status)
-         read (InputFN, *, iostat=status) DecInd
-         if (arg == 1) then
-            p_row = DecInd
-         elseif (arg == 2) then
-            p_col = DecInd
-         elseif (arg == 3) then
-            nx = DecInd
-         elseif (arg == 4) then
-            ny = DecInd
-         elseif (arg == 5) then
-            nz = DecInd
-         end if
-      end do
-   else
-      ! nrank not yet computed we need to avoid write
-      ! for every rank
-      call MPI_COMM_RANK(MPI_COMM_WORLD, nrank, ierror)
-      if (nrank == 0) then
-         print *, "This Test takes no inputs or 2 inputs as"
-         print *, "  1) p_row (default=0)"
-         print *, "  2) p_col (default=0)"
-         print *, "or 5 inputs as"
-         print *, "  1) p_row (default=0)"
-         print *, "  2) p_col (default=0)"
-         print *, "  3) nx "
-         print *, "  4) ny "
-         print *, "  5) nz "
-         print *, "Number of inputs is not correct and the defult settings"
-         print *, "will be used"
-      end if
-   end if
+   call decomp_2d_testing_init(p_row, p_col, nx, ny, nz)
+
    call decomp_2d_init(nx, ny, nz, p_row, p_col)
+
+   call decomp_2d_testing_log()
 
    dx = lx / real(nx, mytype)
    dy = ly / real(ny, mytype)
@@ -486,47 +453,30 @@ contains
 
       implicit none
 
-      character(len=*), parameter :: io_name = "grad-io"
-#ifndef ADIOS2
       logical :: dir_exists
-#endif
 
       !$acc update self (phi1)
       !$acc update self (dphiX)
       !$acc update self (dphiY)
       !$acc update self (dphiZ)
-#ifndef ADIOS2
       if (nrank == 0) then
          inquire (file="out", exist=dir_exists)
          if (.not. dir_exists) then
             call execute_command_line("mkdir out 2> /dev/null")
          end if
       end if
-#endif
 
       call decomp_2d_io_init()
-      call decomp_2d_init_io(io_name)
 
-      call decomp_2d_register_variable(io_name, "phi1.dat", 1, 0, 0, mytype)
-      call decomp_2d_register_variable(io_name, "dphiX.dat", 1, 0, 0, mytype)
-      call decomp_2d_register_variable(io_name, "dphiY.dat", 1, 0, 0, mytype)
-      call decomp_2d_register_variable(io_name, "dphiZ.dat", 1, 0, 0, mytype)
+      ! Standard MPI I/O pattern - 1 file per field
+      call decomp_2d_write_one(1, phi1, 'phi1.dat', opt_dirname='out')
+      call decomp_2d_write_one(1, dphiX, 'dphiX.dat', opt_dirname='out')
+      call decomp_2d_write_one(1, dphiY, 'dphiY.dat', opt_dirname='out')
+      call decomp_2d_write_one(1, dphiZ, 'dphiZ.dat', opt_dirname='out')
 
-      ! Standard I/O pattern - file per field
-#ifdef ADIOS2
-      call decomp_2d_open_io(io_name, "out", decomp_2d_write_mode)
-      call decomp_2d_start_io(io_name, "out")
-#endif
-      call decomp_2d_write_one(1, phi1, 'out', 'phi1.dat', 0, io_name)
-      call decomp_2d_write_one(1, dphiX, 'out', 'dphiX.dat', 0, io_name)
-      call decomp_2d_write_one(1, dphiY, 'out', 'dphiY.dat', 0, io_name)
-      call decomp_2d_write_one(1, dphiZ, 'out', 'dphiZ.dat', 0, io_name)
-#ifdef ADIOS2
-      call decomp_2d_end_io(io_name, "out")
-      call decomp_2d_close_io(io_name, "out")
-#else
+      call decomp_2d_io_fin
+
       call write_xdmf()
-#endif
 
    end subroutine write_data
    !=====================================================================
@@ -536,19 +486,21 @@ contains
       ! This subroutine is based on the xdmf writers in Xcompact3d.
       ! Copyright (c) 2012-2022, Xcompact3d
       ! SPDX-License-Identifier: BSD 3-Clause
+      use, intrinsic :: iso_fortran_env, only: real64
 
-      integer :: ioxdmf
+      integer :: ioxdmf, code
 
       character(len=:), allocatable :: fmt
 
       integer :: precision
-      integer, parameter :: output2D = 0 ! Which plane to write in 2D (0 for 3D)
 
       integer :: varctr
       character(len=16) :: filename
       character(len=5) :: varname
+
       if (nrank == 0) then
-         OPEN (newunit=ioxdmf, file="./out.xdmf")
+         OPEN (newunit=ioxdmf, file="./out.xdmf", iostat=code)
+         if (code /= 0) call decomp_2d_abort(code, "Grad3D : error when opening the file ./out.xdmf")
 
          write (ioxdmf, '(A22)') '<?xml version="1.0" ?>'
          write (ioxdmf, *) '<!DOCTYPE Xdmf SYSTEM "Xdmf.dtd" []>'
@@ -567,7 +519,7 @@ contains
          write (ioxdmf, *) '        </DataItem>'
          write (ioxdmf, *) '        <!-- DxDyDz -->'
          write (ioxdmf, *) '        <DataItem Format="XML" Dimensions="3">'
-         if (mytype == kind(0.0d0)) then
+         if (mytype == kind(0._real64)) then
             fmt = "(A, E24.17, A, E24.17, A, E24.17)"
          else
             fmt = "(A, E16.9, A, E16.9, A, E16.9)"
@@ -595,20 +547,12 @@ contains
                write (filename, '(A)') "./out/dphiZ.dat"
             end select
             write (ioxdmf, *) '       <Attribute Name="'//trim(varname)//'" Center="Node">'
-#ifndef ADIOS2
             write (ioxdmf, *) '          <DataItem Format="Binary"'
-#else
-            write (ioxdmf, *) '          <DataItem Format="HDF"'
-#endif
 
 #ifdef DOUBLE_PREC
             print *, "Double precision build"
 #ifdef SAVE_SINGLE
-            if (output2D == 0) then
-               precision = 4
-            else
-               precision = 8
-            end if
+            precision = 4
 #else
             precision = 8
 #endif
@@ -633,4 +577,5 @@ contains
       end if
 
    end subroutine write_xdmf
+
 end program grad3d

@@ -2,7 +2,7 @@ file(GLOB files_test grad3d.f90)
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 add_executable(grad3d ${files_test})
-target_link_libraries(grad3d PRIVATE decomp2d)
+target_link_libraries(grad3d PRIVATE decomp2d examples_utils)
 
 # Run the test(s)
 set(run_dir "${test_dir}/grad3d")

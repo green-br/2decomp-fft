@@ -12,12 +12,9 @@ module decomp_2d_constants
 
    implicit none
 
-   !private
-
 #ifdef DOUBLE_PREC
    integer, parameter, public :: mytype = KIND(0._real64)
    integer, parameter, public :: real_type = MPI_DOUBLE_PRECISION
-   integer, parameter, public :: real2_type = MPI_2DOUBLE_PRECISION
    integer, parameter, public :: complex_type = MPI_DOUBLE_COMPLEX
 #ifdef SAVE_SINGLE
    integer, parameter, public :: mytype_single = KIND(0._real32)
@@ -29,7 +26,6 @@ module decomp_2d_constants
 #else
    integer, parameter, public :: mytype = KIND(0._real32)
    integer, parameter, public :: real_type = MPI_REAL
-   integer, parameter, public :: real2_type = MPI_2REAL
    integer, parameter, public :: complex_type = MPI_COMPLEX
    integer, parameter, public :: mytype_single = KIND(0._real32)
    integer, parameter, public :: real_type_single = MPI_REAL
@@ -57,15 +53,13 @@ module decomp_2d_constants
    !
    ! Debug checks are performed only when the preprocessor variable DEBUG is defined
    !
-   enum, bind(c)
-      enumerator :: D2D_DEBUG_LEVEL_OFF = 0
-      enumerator :: D2D_DEBUG_LEVEL_CRITICAL = 1
-      enumerator :: D2D_DEBUG_LEVEL_ERROR = 2
-      enumerator :: D2D_DEBUG_LEVEL_WARN = 3
-      enumerator :: D2D_DEBUG_LEVEL_INFO = 4
-      enumerator :: D2D_DEBUG_LEVEL_DEBUG = 5
-      enumerator :: D2D_DEBUG_LEVEL_TRACE = 6
-   end enum
+   integer, parameter, public :: D2D_DEBUG_LEVEL_OFF = 0
+   integer, parameter, public :: D2D_DEBUG_LEVEL_CRITICAL = 1
+   integer, parameter, public :: D2D_DEBUG_LEVEL_ERROR = 2
+   integer, parameter, public :: D2D_DEBUG_LEVEL_WARN = 3
+   integer, parameter, public :: D2D_DEBUG_LEVEL_INFO = 4
+   integer, parameter, public :: D2D_DEBUG_LEVEL_DEBUG = 5
+   integer, parameter, public :: D2D_DEBUG_LEVEL_TRACE = 6
 
    !
    ! Profiler section
@@ -99,11 +93,47 @@ module decomp_2d_constants
    integer, parameter, public :: PHYSICAL_IN_Z = 3 ! Forward is input in Z, output in X
 
    !
+   ! Family of readers / writers
+   !
+   integer, parameter, public :: DECOMP_2D_IO_NONE = 0
+   integer, parameter, public :: DECOMP_2D_IO_MPI = 1
+   integer, parameter, public :: DECOMP_2D_IO_ADIOS2 = 2
+
+   !
+   ! Choice for IO operations
+   !
+#ifdef SAVE_SINGLE
+   logical, parameter :: DEFAULT_OPT_REDUCE_PREC = .true.
+#else
+   logical, parameter :: DEFAULT_OPT_REDUCE_PREC = .false.
+#endif
+   integer, parameter, public :: DECOMP_2D_WRITE_MODE = 1
+   integer, parameter, public :: DECOMP_2D_READ_MODE = 2
+   integer, parameter, public :: DECOMP_2D_APPEND_MODE = 3
+
+   integer, parameter, public :: DECOMP_2D_IO_DEFERRED = 1
+   integer, parameter, public :: DECOMP_2D_IO_SYNC = 2
+
+   !
+   ! Interpolation methods
+   !
+   integer, parameter, public :: DECOMP_2D_INTERP_BASIC = 0 ! Order 0, find closest point without transpose
+
+   !
+   ! FFT can be in-place
+   !
+#ifdef OVERWRITE
+   logical, parameter, public :: DECOMP_2D_FFT_INPLACE = .true.
+#else
+   logical, parameter, public :: DECOMP_2D_FFT_INPLACE = .false.
+#endif
+
+   !
    ! Major and minor version number
    !
    integer, parameter :: D2D_MAJOR = 2
-   integer, parameter :: D2D_MINOR = 0
-   logical, parameter :: D2D_RELEASE = .true.
+   integer, parameter :: D2D_MINOR = 1
+   logical, parameter :: D2D_RELEASE = .false.
 
 end module decomp_2d_constants
 

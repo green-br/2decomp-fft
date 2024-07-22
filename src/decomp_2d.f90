@@ -9,6 +9,7 @@ module decomp_2d
    use factor
    use decomp_2d_constants
    use decomp_2d_mpi
+   use decomp_2d_profiler
 #if defined(_GPU)
    use cudafor
    use decomp_2d_cumpi
@@ -21,6 +22,9 @@ module decomp_2d
    implicit none
 
    private        ! Make everything private unless declared public
+
+   ! Default parameter opt_global in alloc subroutines
+   logical, parameter :: default_opt_global = .false.
 
    ! some key global variables
    integer, save, public :: nx_global, ny_global, nz_global  ! global size
@@ -101,9 +105,6 @@ module decomp_2d
 
    ! main (default) decomposition information for global size nx*ny*nz
    TYPE(DECOMP_INFO), target, save, public :: decomp_main
-   ! FIXME The extra decomp_info objects should be defined in the external code, not here
-   !       Currently keeping them to avoid breaking external codes
-   TYPE(DECOMP_INFO), save, public :: phG, ph1, ph2, ph3, ph4
 
    ! staring/ending index and size of data held by current processor
    ! duplicate 'decomp_main', needed by apps to define data structure
@@ -114,8 +115,12 @@ module decomp_2d
    ! These are the buffers used by MPI_ALLTOALL(V) calls
    integer, save :: decomp_buf_size = 0
    ! Shared real/complex buffers
+#if defined(_GPU)
+   real(mytype), target, device, allocatable, dimension(:) :: work1, work2
+#else
    real(mytype), target, allocatable, dimension(:) :: work1, work2
-   ! Real/complex pointers to buffers
+#endif
+   ! Real/complex pointers to CPU buffers
    real(mytype), pointer, contiguous, dimension(:) :: work1_r, work2_r
    complex(mytype), pointer, contiguous, dimension(:) :: work1_c, work2_c
 
@@ -129,27 +134,12 @@ module decomp_2d
    integer, save :: iskipV, jskipV, kskipV
    integer, save :: iskipP, jskipP, kskipP
 
-   !
-   ! Profiler section
-   !
-   ! Integer to select the profiling tool
-   !    0 => no profiling, default
-   !    1 => Caliper (https://github.com/LLNL/Caliper)
-   !
-   integer(kind(decomp_profiler_none)), save, public :: decomp_profiler = decomp_profiler_none
-   ! Default : profile everything
-   logical, save, public :: decomp_profiler_transpose = .true.
-   logical, save, public :: decomp_profiler_io = .true.
-   logical, save, public :: decomp_profiler_fft = .true.
-   logical, save, public :: decomp_profiler_d2d = .true.
-
    ! public user routines
    public :: decomp_2d_init, decomp_2d_finalize, &
              transpose_x_to_y, transpose_y_to_z, &
              transpose_z_to_y, transpose_y_to_x, &
              decomp_info_init, decomp_info_finalize, partition, &
-             decomp_info_print, decomp_profiler_prep, &
-             decomp_profiler_start, decomp_profiler_end, &
+             decomp_info_print, &
              init_coarser_mesh_statS, fine_to_coarseS, &
              init_coarser_mesh_statV, fine_to_coarseV, &
              init_coarser_mesh_statP, fine_to_coarseP, &
@@ -157,7 +147,9 @@ module decomp_2d
              update_halo, &
              get_decomp_info, &
              get_decomp_dims, &
-             d2d_listing_get_unit, d2d_listing_close_unit
+             d2d_log_is_active, &
+             d2d_log_get_unit, &
+             d2d_log_close_unit
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    ! These are routines to perform global data transpositions
@@ -186,31 +178,87 @@ module decomp_2d
    end interface decomp_2d_finalize
 
    interface transpose_x_to_y
-      module procedure transpose_x_to_y_real_long
-      module procedure transpose_x_to_y_real_short
-      module procedure transpose_x_to_y_complex_long
-      module procedure transpose_x_to_y_complex_short
+      module subroutine transpose_x_to_y_real_long(src, dst, decomp)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_x_to_y_real_long
+      module subroutine transpose_x_to_y_real_short(src, dst)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_x_to_y_real_short
+      module subroutine transpose_x_to_y_complex_long(src, dst, decomp)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_x_to_y_complex_long
+      module subroutine transpose_x_to_y_complex_short(src, dst)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_x_to_y_complex_short
    end interface transpose_x_to_y
 
    interface transpose_y_to_z
-      module procedure transpose_y_to_z_real_long
-      module procedure transpose_y_to_z_real_short
-      module procedure transpose_y_to_z_complex_long
-      module procedure transpose_y_to_z_complex_short
+      module subroutine transpose_y_to_z_real_long(src, dst, decomp)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_y_to_z_real_long
+      module subroutine transpose_y_to_z_real_short(src, dst)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_y_to_z_real_short
+      module subroutine transpose_y_to_z_complex_long(src, dst, decomp)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_y_to_z_complex_long
+      module subroutine transpose_y_to_z_complex_short(src, dst)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_y_to_z_complex_short
    end interface transpose_y_to_z
 
    interface transpose_z_to_y
-      module procedure transpose_z_to_y_real_long
-      module procedure transpose_z_to_y_real_short
-      module procedure transpose_z_to_y_complex_long
-      module procedure transpose_z_to_y_complex_short
+      module subroutine transpose_z_to_y_real_long(src, dst, decomp)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_z_to_y_real_long
+      module subroutine transpose_z_to_y_real_short(src, dst)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_z_to_y_real_short
+      module subroutine transpose_z_to_y_complex_long(src, dst, decomp)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_z_to_y_complex_long
+      module subroutine transpose_z_to_y_complex_short(src, dst)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_z_to_y_complex_short
    end interface transpose_z_to_y
 
    interface transpose_y_to_x
-      module procedure transpose_y_to_x_real_long
-      module procedure transpose_y_to_x_real_short
-      module procedure transpose_y_to_x_complex_long
-      module procedure transpose_y_to_x_complex_short
+      module subroutine transpose_y_to_x_real_long(src, dst, decomp)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_y_to_x_real_long
+      module subroutine transpose_y_to_x_real_short(src, dst)
+         real(mytype), dimension(:, :, :), intent(IN) :: src
+         real(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_y_to_x_real_short
+      module subroutine transpose_y_to_x_complex_long(src, dst, decomp)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+         TYPE(DECOMP_INFO), intent(IN) :: decomp
+      end subroutine transpose_y_to_x_complex_long
+      module subroutine transpose_y_to_x_complex_short(src, dst)
+         complex(mytype), dimension(:, :, :), intent(IN) :: src
+         complex(mytype), dimension(:, :, :), intent(OUT) :: dst
+      end subroutine transpose_y_to_x_complex_short
    end interface transpose_y_to_x
 
    interface update_halo
@@ -221,39 +269,67 @@ module decomp_2d
    end interface update_halo
 
    interface alloc_x
-      module procedure alloc_x_real
-      module procedure alloc_x_real_short
-      module procedure alloc_x_complex
-      module procedure alloc_x_complex_short
+      module procedure alloc_x_freal
+      module procedure alloc_x_freal_short
+      module procedure alloc_x_dreal
+      module procedure alloc_x_dreal_short
+      module procedure alloc_x_fcplx
+      module procedure alloc_x_fcplx_short
+      module procedure alloc_x_dcplx
+      module procedure alloc_x_dcplx_short
+      module procedure alloc_x_ints
+      module procedure alloc_x_ints_short
+      module procedure alloc_x_logs
+      module procedure alloc_x_logs_short
    end interface alloc_x
 
    interface alloc_y
-      module procedure alloc_y_real
-      module procedure alloc_y_real_short
-      module procedure alloc_y_complex
-      module procedure alloc_y_complex_short
+      module procedure alloc_y_freal
+      module procedure alloc_y_freal_short
+      module procedure alloc_y_dreal
+      module procedure alloc_y_dreal_short
+      module procedure alloc_y_fcplx
+      module procedure alloc_y_fcplx_short
+      module procedure alloc_y_dcplx
+      module procedure alloc_y_dcplx_short
+      module procedure alloc_y_ints
+      module procedure alloc_y_ints_short
+      module procedure alloc_y_logs
+      module procedure alloc_y_logs_short
    end interface alloc_y
 
    interface alloc_z
-      module procedure alloc_z_real
-      module procedure alloc_z_real_short
-      module procedure alloc_z_complex
-      module procedure alloc_z_complex_short
+      module procedure alloc_z_freal
+      module procedure alloc_z_freal_short
+      module procedure alloc_z_dreal
+      module procedure alloc_z_dreal_short
+      module procedure alloc_z_fcplx
+      module procedure alloc_z_fcplx_short
+      module procedure alloc_z_dcplx
+      module procedure alloc_z_dcplx_short
+      module procedure alloc_z_ints
+      module procedure alloc_z_ints_short
+      module procedure alloc_z_logs
+      module procedure alloc_z_logs_short
    end interface alloc_z
 
    interface
 
-      module function d2d_listing_get_unit()
-         integer :: d2d_listing_get_unit
-      end function d2d_listing_get_unit
+      module function d2d_log_is_active()
+         logical :: d2d_log_is_active
+      end function d2d_log_is_active
 
-      module subroutine d2d_listing_close_unit(io_unit)
+      module function d2d_log_get_unit()
+         integer :: d2d_log_get_unit
+      end function d2d_log_get_unit
+
+      module subroutine d2d_log_close_unit(io_unit)
          integer, intent(in) :: io_unit
-      end subroutine d2d_listing_close_unit
+      end subroutine d2d_log_close_unit
 
-      module subroutine d2d_listing(given_io_unit)
+      module subroutine d2d_log(given_io_unit)
          integer, intent(in), optional :: given_io_unit
-      end subroutine d2d_listing
+      end subroutine d2d_log
 
       module subroutine decomp_info_print(d2d, io_unit, d2dname)
          type(decomp_info), intent(in) :: d2d
@@ -262,46 +338,6 @@ module decomp_2d
       end subroutine decomp_info_print
 
    end interface
-
-   ! Generic interface to initialize the profiler
-   interface decomp_profiler_init
-      module subroutine decomp_profiler_init_noarg
-      end subroutine decomp_profiler_init_noarg
-   end interface decomp_profiler_init
-
-   ! Generic interface to finalize the profiler
-   interface decomp_profiler_fin
-      module subroutine decomp_profiler_fin_noarg
-      end subroutine decomp_profiler_fin_noarg
-   end interface decomp_profiler_fin
-
-   ! Generic interface for the profiler to log setup
-   interface decomp_profiler_log
-      module subroutine decomp_profiler_log_int(io_unit)
-         integer, intent(in) :: io_unit
-      end subroutine decomp_profiler_log_int
-   end interface decomp_profiler_log
-
-   ! Generic interface to prepare the profiler before init.
-   interface decomp_profiler_prep
-      module subroutine decomp_profiler_prep_bool(profiler_setup)
-         logical, dimension(4), intent(in), optional :: profiler_setup
-      end subroutine decomp_profiler_prep_bool
-   end interface decomp_profiler_prep
-
-   ! Generic interface for the profiler to start a given timer
-   interface decomp_profiler_start
-      module subroutine decomp_profiler_start_char(timer_name)
-         character(len=*), intent(in) :: timer_name
-      end subroutine decomp_profiler_start_char
-   end interface decomp_profiler_start
-
-   ! Generic interface for the profiler to end a given timer
-   interface decomp_profiler_end
-      module subroutine decomp_profiler_end_char(timer_name)
-         character(len=*), intent(in) :: timer_name
-      end subroutine decomp_profiler_end_char
-   end interface decomp_profiler_end
 
 contains
 
@@ -411,9 +447,6 @@ contains
       ! check if additional memory is required
       if (buf_size > decomp_buf_size) then
          decomp_buf_size = buf_size
-#if defined(_GPU)
-         call decomp_2d_cumpi_init(buf_size)
-#endif
          if (associated(work1_r)) nullify (work1_r)
          if (associated(work2_r)) nullify (work2_r)
          if (associated(work1_c)) nullify (work1_c)
@@ -436,6 +469,12 @@ contains
          call c_f_pointer(c_loc(work2), work2_r, [buf_size])
          call c_f_pointer(c_loc(work1), work1_c, [buf_size])
          call c_f_pointer(c_loc(work2), work2_c, [buf_size])
+#if defined(_GPU)
+         call decomp_2d_cumpi_init(buf_size, work1, work2)
+#if defined(_NCCL)
+         call decomp_2d_nccl_mem_init(buf_size)
+#endif
+#endif
       end if
 
    end subroutine decomp_info_init
@@ -478,6 +517,12 @@ contains
 
       integer, dimension(3) :: skip
       integer :: i
+      logical, save :: first_call = .true.
+
+      if (first_call) then
+         first_call = .false.
+         call decomp_2d_warning(__FILE__, __LINE__, 0, "init_coarser_mesh_stat is deprecated and will be removed")
+      end if
 
       coarse_mesh_starts_from_1 = from1
       iskipS = i_skip
@@ -543,6 +588,12 @@ contains
 
       integer, dimension(3) :: skip
       integer :: i
+      logical, save :: first_call = .true.
+
+      if (first_call) then
+         first_call = .false.
+         call decomp_2d_warning(__FILE__, __LINE__, 0, "init_coarser_mesh_stat is deprecated and will be removed")
+      end if
 
       coarse_mesh_starts_from_1 = from1
       iskipV = i_skip
@@ -608,6 +659,12 @@ contains
 
       integer, dimension(3) :: skip
       integer :: i
+      logical, save :: first_call = .true.
+
+      if (first_call) then
+         first_call = .false.
+         call decomp_2d_warning(__FILE__, __LINE__, 0, "init_coarser_mesh_stat is deprecated and will be removed")
+      end if
 
       coarse_mesh_starts_from_1 = from1
       iskipP = i_skip
@@ -671,10 +728,16 @@ contains
 
       real(mytype), allocatable, dimension(:, :, :) :: wk, wk2
       integer :: i, j, k
+      logical, save :: first_call = .true.
+
+      if (first_call) then
+         first_call = .false.
+         call decomp_2d_warning(__FILE__, __LINE__, 0, "fine_to_coarse is deprecated and will be removed")
+      end if
 
       if (ipencil == 1) then
          allocate (wk(xstS(1):xenS(1), xstS(2):xenS(2), xstS(3):xenS(3)))
-         allocate (wk2(xstart(1):xend(1), xstart(2):xend(2), xstart(3):xend(3)))
+         call alloc_x(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = xstS(3), xenS(3)
@@ -696,7 +759,7 @@ contains
          var_coarse = wk
       else if (ipencil == 2) then
          allocate (wk(ystS(1):yenS(1), ystS(2):yenS(2), ystS(3):yenS(3)))
-         allocate (wk2(ystart(1):yend(1), ystart(2):yend(2), ystart(3):yend(3)))
+         call alloc_y(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = ystS(3), yenS(3)
@@ -718,7 +781,7 @@ contains
          var_coarse = wk
       else if (ipencil == 3) then
          allocate (wk(zstS(1):zenS(1), zstS(2):zenS(2), zstS(3):zenS(3)))
-         allocate (wk2(zstart(1):zend(1), zstart(2):zend(2), zstart(3):zend(3)))
+         call alloc_z(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = zstS(3), zenS(3)
@@ -756,10 +819,16 @@ contains
 
       real(mytype), allocatable, dimension(:, :, :) :: wk, wk2
       integer :: i, j, k
+      logical, save :: first_call = .true.
+
+      if (first_call) then
+         first_call = .false.
+         call decomp_2d_warning(__FILE__, __LINE__, 0, "fine_to_coarse is deprecated and will be removed")
+      end if
 
       if (ipencil == 1) then
          allocate (wk(xstV(1):xenV(1), xstV(2):xenV(2), xstV(3):xenV(3)))
-         allocate (wk2(xstart(1):xend(1), xstart(2):xend(2), xstart(3):xend(3)))
+         call alloc_x(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = xstV(3), xenV(3)
@@ -781,7 +850,7 @@ contains
          var_coarse = wk
       else if (ipencil == 2) then
          allocate (wk(ystV(1):yenV(1), ystV(2):yenV(2), ystV(3):yenV(3)))
-         allocate (wk2(ystart(1):yend(1), ystart(2):yend(2), ystart(3):yend(3)))
+         call alloc_y(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = ystV(3), yenV(3)
@@ -803,7 +872,7 @@ contains
          var_coarse = wk
       else if (ipencil == 3) then
          allocate (wk(zstV(1):zenV(1), zstV(2):zenV(2), zstV(3):zenV(3)))
-         allocate (wk2(zstart(1):zend(1), zstart(2):zend(2), zstart(3):zend(3)))
+         call alloc_z(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = zstV(3), zenV(3)
@@ -841,10 +910,16 @@ contains
 
       real(mytype), allocatable, dimension(:, :, :) :: wk, wk2
       integer :: i, j, k
+      logical, save :: first_call = .true.
+
+      if (first_call) then
+         first_call = .false.
+         call decomp_2d_warning(__FILE__, __LINE__, 0, "fine_to_coarse is deprecated and will be removed")
+      end if
 
       if (ipencil == 1) then
          allocate (wk(xstP(1):xenP(1), xstP(2):xenP(2), xstP(3):xenP(3)))
-         allocate (wk2(xstart(1):xend(1), xstart(2):xend(2), xstart(3):xend(3)))
+         call alloc_x(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = xstP(3), xenP(3)
@@ -866,7 +941,7 @@ contains
          var_coarse = wk
       else if (ipencil == 2) then
          allocate (wk(ystP(1):yenP(1), ystP(2):yenP(2), ystP(3):yenP(3)))
-         allocate (wk2(ystart(1):yend(1), ystart(2):yend(2), ystart(3):yend(3)))
+         call alloc_y(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = ystP(3), yenP(3)
@@ -888,7 +963,7 @@ contains
          var_coarse = wk
       else if (ipencil == 3) then
          allocate (wk(zstP(1):zenP(1), zstP(2):zenP(2), zstP(3):zenP(3)))
-         allocate (wk2(zstart(1):zend(1), zstart(2):zend(2), zstart(3):zend(3)))
+         call alloc_z(wk2, opt_global=.true.)
          wk2 = var_fine
          if (coarse_mesh_starts_from_1) then
             do k = zstP(3), zenP(3)
@@ -1010,10 +1085,13 @@ contains
          sz(i) = size1
          en(i) = en(i - 1) + size1
       end do
-      en(proc - 1) = data1
-      sz(proc - 1) = data1 - st(proc - 1) + 1
 
-      return
+      ! Safety checks
+      if (en(proc - 1) /= data1) &
+         call decomp_2d_abort(__FILE__, __LINE__, en(proc - 1), "Invalid distribution.")
+      if (sz(proc - 1) /= (data1 - st(proc - 1) + 1)) &
+         call decomp_2d_abort(__FILE__, __LINE__, sz(proc - 1), "Invalid distribution.")
+
    end subroutine distribute
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1115,14 +1193,6 @@ contains
 #endif
 
    end subroutine prepare_buffer
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   ! Transposition routines
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-#include "transpose_x_to_y.f90"
-#include "transpose_y_to_z.f90"
-#include "transpose_z_to_y.f90"
-#include "transpose_y_to_x.f90"
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    ! Halo cell support

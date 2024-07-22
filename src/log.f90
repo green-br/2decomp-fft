@@ -1,7 +1,9 @@
 !! SPDX-License-Identifier: BSD-3-Clause
 
-submodule(decomp_2d) d2d_log
+! This file contains routines easing the output to stdout / log files
+submodule(decomp_2d) d2d_log_submodule
 
+   use iso_fortran_env, only: output_unit
    use decomp_2d_constants
    use decomp_2d_mpi
 
@@ -10,16 +12,36 @@ submodule(decomp_2d) d2d_log
 contains
 
    !
-   ! Get the IO unit for the log
+   ! Return true if this rank will write to the listing
    !
-   module function d2d_listing_get_unit()
-
-      use iso_fortran_env, only: output_unit
+   module function d2d_log_is_active()
 
       implicit none
 
       ! Output
-      integer :: d2d_listing_get_unit
+      logical :: d2d_log_is_active
+
+      if (decomp_log == D2D_LOG_STDOUT .and. nrank == 0) then
+         d2d_log_is_active = .true.
+      else if (decomp_log == D2D_LOG_TOFILE .and. nrank == 0) then
+         d2d_log_is_active = .true.
+      else if (decomp_log == D2D_LOG_TOFILE_FULL) then
+         d2d_log_is_active = .true.
+      else
+         d2d_log_is_active = .false.
+      end if
+
+   end function d2d_log_is_active
+
+   !
+   ! Get the IO unit for the log
+   !
+   module function d2d_log_get_unit()
+
+      implicit none
+
+      ! Output
+      integer :: d2d_log_get_unit
 
       ! Local variables
       logical :: found
@@ -31,13 +53,13 @@ contains
          inquire (file='decomp_2d_setup_'//trim(fname)//'.log', &
                   exist=found)
          if (found) then
-            open (newunit=d2d_listing_get_unit, &
+            open (newunit=d2d_log_get_unit, &
                   file='decomp_2d_setup_'//trim(fname)//'.log', &
                   status="old", &
                   position="append", &
                   iostat=ierror)
          else
-            open (newunit=d2d_listing_get_unit, &
+            open (newunit=d2d_log_get_unit, &
                   file='decomp_2d_setup_'//trim(fname)//'.log', &
                   status="new", &
                   iostat=ierror)
@@ -46,31 +68,29 @@ contains
          inquire (file="decomp_2d_setup.log", &
                   exist=found)
          if (found) then
-            open (newunit=d2d_listing_get_unit, &
+            open (newunit=d2d_log_get_unit, &
                   file="decomp_2d_setup.log", &
                   status="old", &
                   position="append", &
                   iostat=ierror)
          else
-            open (newunit=d2d_listing_get_unit, &
+            open (newunit=d2d_log_get_unit, &
                   file="decomp_2d_setup.log", &
                   status="new", &
                   iostat=ierror)
          end if
       else
-         d2d_listing_get_unit = output_unit
+         d2d_log_get_unit = output_unit
          ierror = 0
       end if
       if (ierror /= 0) call decomp_2d_abort(__FILE__, __LINE__, ierror, "Could not open log file")
 
-   end function d2d_listing_get_unit
+   end function d2d_log_get_unit
 
    !
    ! Close the IO unit for the log if needed
    !
-   module subroutine d2d_listing_close_unit(io_unit)
-
-      use iso_fortran_env, only: output_unit
+   module subroutine d2d_log_close_unit(io_unit)
 
       implicit none
 
@@ -88,14 +108,14 @@ contains
          if (ierror /= 0) call decomp_2d_abort(ierror, "Could not close log file")
       end if
 
-   end subroutine d2d_listing_close_unit
+   end subroutine d2d_log_close_unit
 
    !
    ! Print some information about decomp_2d
    !
-   module subroutine d2d_listing(given_io_unit)
+   module subroutine d2d_log(given_io_unit)
 
-      use iso_fortran_env, only: output_unit, compiler_version, compiler_options
+      use iso_fortran_env, only: compiler_version, compiler_options
 
       implicit none
 
@@ -103,16 +123,13 @@ contains
       integer, intent(in), optional :: given_io_unit
 
       ! Local variable
-      integer :: io_unit
-      integer :: version, subversion, ierror
+      integer :: io_unit, version, subversion, ierror
 #ifdef DEBUG
       character(len=512) :: fname
 #endif
 
       ! Output log if needed
-      if (decomp_log == D2D_LOG_QUIET) return
-      if (decomp_log == D2D_LOG_STDOUT .and. nrank /= 0) return
-      if (decomp_log == D2D_LOG_TOFILE .and. nrank /= 0) return
+      if (.not. d2d_log_is_active()) return
 
       ! If no IO unit provided, use stdout
       if (present(given_io_unit)) then
@@ -121,7 +138,7 @@ contains
          io_unit = output_unit
       end if
 
-      ! Header
+      ! Print the header
       write (io_unit, *) '==========================================================='
       write (io_unit, *) '=================== Decomp2D - log ========================'
       write (io_unit, *) '==========================================================='
@@ -192,21 +209,15 @@ contains
 #endif
       write (io_unit, *) '==========================================================='
       write (io_unit, *) 'Profiler id : ', decomp_profiler
-#ifdef PROFILER
       call decomp_profiler_log(io_unit)
-      write (io_unit, *) "   Profiling transpose : ", decomp_profiler_transpose
-      write (io_unit, *) "   Profiling IO : ", decomp_profiler_io
-      write (io_unit, *) "   Profiling FFT : ", decomp_profiler_fft
-      write (io_unit, *) "   Profiling decomp_2d : ", decomp_profiler_d2d
-#endif
+      if (decomp_profiler /= decomp_profiler_none) then
+         write (io_unit, *) "   Profiling transpose : ", decomp_profiler_transpose
+         write (io_unit, *) "   Profiling IO : ", decomp_profiler_io
+         write (io_unit, *) "   Profiling FFT : ", decomp_profiler_fft
+         write (io_unit, *) "   Profiling decomp_2d : ", decomp_profiler_d2d
+      end if
       write (io_unit, *) '==========================================================='
-      ! Info about each decomp_info object
       call decomp_info_print(decomp_main, io_unit, "decomp_main")
-      call decomp_info_print(phG, io_unit, "phG")
-      call decomp_info_print(ph1, io_unit, "ph1")
-      call decomp_info_print(ph2, io_unit, "ph2")
-      call decomp_info_print(ph3, io_unit, "ph3")
-      call decomp_info_print(ph4, io_unit, "ph4")
       write (io_unit, *) '==========================================================='
       write (io_unit, *) '==========================================================='
 
@@ -216,7 +227,7 @@ contains
       !
       ! At high debug level, all ranks will print env. variables
       !
-      ! The system call, if writing to a file, is not blocking if supported
+      ! The system call, if writing to a file, is blocking
       !
       if (nrank == 0 .or. decomp_debug >= D2D_DEBUG_LEVEL_INFO) then
          write (io_unit, *) '============== Environment variables ======================'
@@ -230,16 +241,16 @@ contains
                call decomp_2d_abort(__FILE__, __LINE__, ierror, "No name for the log file")
             end if
             ! Close the IO unit to print the environment variables
-            call d2d_listing_close_unit(io_unit)
+            call d2d_log_close_unit(io_unit)
             call execute_command_line("env >> "//trim(fname), wait=.true.)
          end if
       end if
 #else
       ! Close the IO unit if needed
-      call d2d_listing_close_unit(io_unit)
+      call d2d_log_close_unit(io_unit)
 #endif
 
-   end subroutine d2d_listing
+   end subroutine d2d_log
 
    !
    ! Print some information about given decomp_info object
@@ -292,4 +303,4 @@ contains
 
    end subroutine decomp_info_print
 
-end submodule d2d_log
+end submodule d2d_log_submodule
